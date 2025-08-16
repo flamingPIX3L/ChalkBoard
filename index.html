@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chalkboard</title>
+  <style>
+    :root{--bg:#0c1117;--panel:#101722;--muted:#8aa0bd;--text:#e7f0ff;--brand:#6cc5ff;--accent:#7bf1a8;--line:#1d2a3a}
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,sans-serif;background:var(--bg);color:var(--text)}
+    header{position:sticky;top:0;z-index:30;background:#0b131eaa;border-bottom:1px solid var(--line);backdrop-filter:blur(10px)}
+    .nav{max-width:1000px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:10px 14px}
+    .logo{width:28px;height:28px;border-radius:7px;background:conic-gradient(from 210deg,var(--brand),var(--accent));box-shadow:0 0 0 2px #0c1117}
+    .brand{font-weight:800;letter-spacing:.2px}
+    .sp{flex:1}
+    .btn{background:#132132;border:1px solid #223249;color:#cfe4ff;border-radius:10px;padding:8px 12px;cursor:pointer}
+    .btn.primary{background:#1a2a40}
+    .btn.ghost{background:transparent;border-color:#223249}
+    main{max-width:1000px;margin:16px auto;display:grid;grid-template-columns:280px 1fr;gap:16px;padding:0 12px}
+    @media (max-width: 900px){main{grid-template-columns:1fr}}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:14px}
+    .sec{padding:12px 14px;border-bottom:1px solid var(--line)}
+    .sec:last-child{border-bottom:0}
+    input,textarea,select{width:100%;background:#0e1622;border:1px solid #1e2b3e;color:var(--text);border-radius:10px;padding:10px;outline:none}
+    textarea{min-height:110px;resize:vertical}
+    .muted{color:var(--muted)}
+    .feed{display:flex;flex-direction:column}
+    .post{display:block;padding:12px;border-bottom:1px solid var(--line);text-decoration:none;color:inherit}
+    .post:hover{background:#0f1a28}
+    .title{font-weight:800;margin:6px 0}
+    .row{display:flex;gap:8px;align-items:center}
+    .avatar{width:28px;height:28px;border-radius:999px;background:#182332;display:grid;place-items:center;font-size:12px;color:#b7c9e7;border:1px solid #26364d;overflow:hidden}
+    .avatar img{width:100%;height:100%;object-fit:cover}
+    .chip{font-size:12px;padding:3px 8px;border-radius:999px;border:1px solid #223249;background:#0e1622;color:#cfe4ff}
+    .action{display:inline-flex;gap:6px;align-items:center;padding:6px 8px;border-radius:8px;border:1px solid #203049;background:#0d1622;cursor:pointer}
+    dialog{border:0;border-radius:14px;padding:0;background:var(--panel);color:var(--text)}
+    dialog::backdrop{background:rgba(0,0,0,.4)}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .right{display:flex;justify-content:flex-end}
+    .center{text-align:center}
+    .hidden{display:none}
+    .likes{display:flex;gap:6px}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="nav">
+      <div class="logo" aria-hidden="true"></div>
+      <div class="brand">Chalkboard</div>
+      <div class="sp"></div>
+      <div id="who" class="row"></div>
+      <button id="btnNew" class="btn primary">New Post</button>
+    </div>
+  </header>
+
+  <main>
+    <aside class="card">
+      <div class="sec">
+        <div class="row"><div class="avatar" id="meAvatar"><span>?</span></div>
+          <div>
+            <div id="meName" style="font-weight:700">Guest</div>
+            <div id="meEmail" class="muted" style="font-size:12px">Not signed in</div>
+          </div>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="row">
+          <button id="btnLogin" class="btn">Log in</button>
+          <button id="btnSignup" class="btn ghost">Sign up</button>
+          <button id="btnEditProfile" class="btn hidden">Edit profile</button>
+          <button id="btnLogout" class="btn hidden">Log out</button>
+        </div>
+      </div>
+      <div class="sec">
+        <input id="q" placeholder="Search posts… ( / to focus )" />
+      </div>
+      <div class="sec">
+        <select id="sort">
+          <option value="new">Newest</option>
+          <option value="top">Top (likes)</option>
+        </select>
+      </div>
+    </aside>
+
+    <section class="card">
+      <div class="sec row" style="justify-content:space-between">
+        <div>
+          <div style="font-weight:800">Feed</div>
+          <div class="muted" style="font-size:12px">Real-time posts from students</div>
+        </div>
+      </div>
+      <div id="feed" class="feed"></div>
+      <div id="empty" class="sec center muted hidden">No posts yet.</div>
+    </section>
+  </main>
+
+  <!-- Auth Dialog -->
+  <dialog id="authDlg"></dialog>
+  <!-- Profile Dialog -->
+  <dialog id="profileDlg"></dialog>
+  <!-- Post Editor -->
+  <dialog id="editorDlg"></dialog>
+  <!-- Post Popup -->
+  <dialog id="postDlg"></dialog>
+
+  <script type="module">
+    // Firebase SDKs
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js';
+    import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js';
+    import { getDatabase, ref, push, onChildAdded, onValue, set, get, child, update, runTransaction, query, orderByChild, limitToLast } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-database.js';
+    import { getStorage, ref as sRef, uploadBytes, getDownloadURL } from 'https://www.gstatic.com/firebasejs/12.1.0/firebase-storage.js';
+
+    // Your config
+    const firebaseConfig = {
+      apiKey: 'AIzaSyC9a7uxYVe8gL6zibteDQOljiUP1pYunBI',
+      authDomain: 'chalkboardhtml.firebaseapp.com',
+      databaseURL: 'https://chalkboardhtml-default-rtdb.firebaseio.com/',
+      projectId: 'chalkboardhtml',
+      storageBucket: 'chalkboardhtml.firebasestorage.app',
+      messagingSenderId: '453931014085',
+      appId: '1:453931014085:web:39258e55b76df6c727ddac'
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getDatabase(app);
+    const storage = getStorage(app);
+
+    // Helpers
+    const $ = (s, el=document) => el.querySelector(s);
+    const $$ = (s, el=document) => Array.from(el.querySelectorAll(s));
+    const fmtTime = (t)=> new Date(t).toLocaleString();
+
+    // UI Elements
+    const meAvatar = $('#meAvatar');
+    const meName = $('#meName');
+    const meEmail = $('#meEmail');
+    const btnLogin = $('#btnLogin');
+    const btnSignup = $('#btnSignup');
+    const btnLogout = $('#btnLogout');
+    const btnEditProfile = $('#btnEditProfile');
+    const btnNew = $('#btnNew');
+    const feed = $('#feed');
+    const empty = $('#empty');
+
+    // State
+    let newestKey = null; // for incremental loading if needed later
+
+    // ---------- AUTH DIALOGS ----------
+    function openLogin(){
+      const dlg = $('#authDlg');
+      dlg.innerHTML = `
+        <form method="dialog" class="card">
+          <div class="sec"><div style="font-weight:800">Log in</div></div>
+          <div class="sec">
+            <input id="lEmail" type="email" placeholder="Email" required />
+            <div style="height:8px"></div>
+            <input id="lPass" type="password" placeholder="Password" required />
+          </div>
+          <div class="sec right">
+            <button class="btn ghost" value="cancel">Cancel</button>
+            <button class="btn primary" id="doLogin">Log in</button>
+          </div>
+        </form>`;
+      dlg.showModal();
+      $('#doLogin', dlg).onclick = async (e)=>{
+        e.preventDefault();
+        try{
+          await signInWithEmailAndPassword(auth, $('#lEmail', dlg).value, $('#lPass', dlg).value);
+          dlg.close();
+        }catch(err){ alert(err.message); }
+      }
+    }
+
+    function openSignup(){
+      const dlg = $('#authDlg');
+      dlg.innerHTML = `
+        <form method="dialog" class="card">
+          <div class="sec"><div style="font-weight:800">Sign up</div><div class="muted" style="font-size:12px">Use any email. You can set a profile later.</div></div>
+          <div class="sec">
+            <input id="sName" placeholder="Display name" required />
+            <div style="height:8px"></div>
+            <input id="sEmail" type="email" placeholder="Email" required />
+            <div style="height:8px"></div>
+            <input id="sPass" type="password" placeholder="Password" required />
+          </div>
+          <div class="sec right">
+            <button class="btn ghost" value="cancel">Cancel</button>
+            <button class="btn primary" id="doSignup">Create account</button>
+          </div>
+        </form>`;
+      dlg.showModal();
+      $('#doSignup', dlg).onclick = async (e)=>{
+        e.preventDefault();
+        try{
+          const cred = await createUserWithEmailAndPassword(auth, $('#sEmail', dlg).value, $('#sPass', dlg).value);
+          await updateProfile(cred.user, { displayName: $('#sName', dlg).value });
+          // init user profile in DB
+          await set(ref(db, `users/${cred.user.uid}`), {
+            uid: cred.user.uid,
+            displayName: $('#sName', dlg).value,
+            bio: '',
+            photoURL: cred.user.photoURL || '',
+            followers: 0,
+            following: 0,
+            createdAt: Date.now()
+          });
+          dlg.close();
+        }catch(err){ alert(err.message); }
+      }
+    }
+
+    function openProfileEditor(user){
+      const dlg = $('#profileDlg');
+      dlg.innerHTML = `
+        <form method="dialog" class="card">
+          <div class="sec"><div style="font-weight:800">Edit profile</div></div>
+          <div class="sec">
+            <div class="grid2">
+              <div>
+                <label class="muted">Display name</label>
+                <input id="pName" value="${user.displayName||''}" />
+              </div>
+              <div>
+                <label class="muted">Avatar</label>
+                <input id="pAvatar" type="file" accept="image/*" />
+              </div>
+            </div>
+            <div style="height:8px"></div>
+            <label class="muted">Bio</label>
+            <textarea id="pBio" placeholder="Say something about yourself"></textarea>
+          </div>
+          <div class="sec right">
+            <button class="btn ghost" value="cancel">Cancel</button>
+            <button class="btn primary" id="saveProfile">Save</button>
+          </div>
+        </form>`;
+      // Load current bio from DB
+      onValue(ref(db, `users/${user.uid}/bio`), snap=>{ $('#pBio', dlg).value = snap.val()||''; }, { onlyOnce:true });
+      dlg.showModal();
+
+      $('#saveProfile', dlg).onclick = async (e)=>{
+        e.preventDefault();
+        try{
+          let photoURL = user.photoURL || '';
+          const file = $('#pAvatar', dlg).files[0];
+          if(file){
+            const upRef = sRef(storage, `avatars/${user.uid}`);
+            await uploadBytes(upRef, file);
+            photoURL = await getDownloadURL(upRef);
+          }
+          const displayName = $('#pName', dlg).value || user.email;
+          await updateProfile(user, { displayName, photoURL });
+          await update(ref(db, `users/${user.uid}`), { displayName, photoURL, bio: $('#pBio', dlg).value });
+          dlg.close();
+        }catch(err){ alert(err.message); }
+      };
+    }
+
+    async function openUserProfile(uid){
+      const dlg = $('#profileDlg');
+      const userSnap = await get(ref(db, `users/${uid}`));
+      if(!userSnap.exists()){ alert('User not found'); return; }
+      const u = userSnap.val();
+      const me = auth.currentUser;
+      const isMe = me && me.uid===uid;
+
+      dlg.innerHTML = `
+        <div class="card">
+          <div class="sec row">
+            <div class="avatar" style="width:48px;height:48px">${u.photoURL? `<img src="${u.photoURL}">` : `<span>${(u.displayName||'?').slice(0,1).toUpperCase()}</span>`}</div>
+            <div>
+              <div style="font-weight:800">${u.displayName||'Student'}</div>
+              <div class="muted" style="font-size:12px">Followers: <span id="pfFollowers">${u.followers||0}</span> • Following: <span id="pfFollowing">${u.following||0}</span></div>
+            </div>
+            <div class="sp"></div>
+            ${isMe ? '<button class="btn" id="pfEdit">Edit</button>' : '<button class="btn" id="pfFollow">Follow</button>'}
+          </div>
+          <div class="sec">${u.bio? u.bio : '<span class="muted">No bio yet.</span>'}</div>
+          <div class="sec"><div style="font-weight:800">Recent posts</div><div id="pfPosts"></div></div>
+          <div class="sec right"><button class="btn ghost" id="pfClose">Close</button></div>
+        </div>`;
+      dlg.showModal();
+      $('#pfClose', dlg).onclick=()=>dlg.close();
+      $('#pfEdit', dlg)?.addEventListener('click', ()=>{ dlg.close(); openProfileEditor(auth.currentUser); });
+
+      // Follow button state
+      if(!isMe && me){
+        onValue(ref(db, `following/${me.uid}/${uid}`), snap=>{
+          const following = !!snap.val();
+          const b = $('#pfFollow', dlg);
+          if(!b) return;
+          b.textContent = following? 'Unfollow' : 'Follow';
+          b.onclick = async ()=>{
+            try{
+              if(following){
+                await set(ref(db, `following/${me.uid}/${uid}`), null);
+                await set(ref(db, `followers/${uid}/${me.uid}`), null);
+                await runTransaction(ref(db, `users/${uid}/followers`), n=> (n||0)-1);
+                await runTransaction(ref(db, `users/${me.uid}/following`), n=> (n||0)-1);
+              }else{
+                await set(ref(db, `following/${me.uid}/${uid}`), true);
+                await set(ref(db, `followers/${uid}/${me.uid}`), true);
+                await runTransaction(ref(db, `users/${uid}/followers`), n=> (n||0)+1);
+                await runTransaction(ref(db, `users/${me.uid}/following`), n=> (n||0)+1);
+              }
+            }catch(err){ alert(err.message); }
+          }
+        });
+      }
+
+      // Recent posts by user
+      const qRef = query(ref(db, 'posts'), orderByChild('authorUid'));
+      onChildAdded(qRef, (snap)=>{
+        const p = snap.val();
+        if(p.authorUid !== uid) return;
+        const host = $('#pfPosts', dlg);
+        const a = document.createElement('a');
+        a.href='#'; a.className='post'; a.dataset.id=snap.key;
+        a.innerHTML = `<div class="title">${p.title}</div><div class="muted" style="font-size:12px">${fmtTime(p.timestamp)} • ${p.likeCount||0} likes</div>`;
+        a.onclick = (e)=>{ e.preventDefault(); openPostPopup(snap.key, p); };
+        host.prepend(a);
+      });
+    }
+
+    // ---------- POSTS ----------
+    function openEditor(){
+      if(!auth.currentUser){ openLogin(); return; }
+      const dlg = $('#editorDlg');
+      dlg.innerHTML = `
+        <form method="dialog" class="card">
+          <div class="sec"><div style="font-weight:800">New post</div></div>
+          <div class="sec">
+            <input id="eTitle" placeholder="Title" required />
+            <div style="height:8px"></div>
+            <textarea id="eBody" placeholder="Say what's happening" required></textarea>
+            <div style="height:8px"></div>
+            <label class="muted">Image (optional)</label>
+            <input id="eImage" type="file" accept="image/*" />
+          </div>
+          <div class="sec right">
+            <button class="btn ghost" value="cancel">Cancel</button>
+            <button class="btn primary" id="doPost">Publish</button>
+          </div>
+        </form>`;
+      dlg.showModal();
+
+      $('#doPost', dlg).onclick = async (e)=>{
+        e.preventDefault();
+        try{
+          const u = auth.currentUser;
+          let imageURL='';
+          const f = $('#eImage', dlg).files[0];
+          if(f){
+            const pRef = sRef(storage, `posts/${u.uid}/${Date.now()}_${f.name}`);
+            await uploadBytes(pRef, f);
+            imageURL = await getDownloadURL(pRef);
+          }
+          const postRef = await push(ref(db, 'posts'), {
+            title: $('#eTitle', dlg).value,
+            body: $('#eBody', dlg).value,
+            imageURL,
+            authorUid: u.uid,
+            authorName: u.displayName || u.email,
+            authorPhoto: u.photoURL || '',
+            likeCount: 0,
+            dislikeCount: 0,
+            commentCount: 0,
+            timestamp: Date.now()
+          });
+          dlg.close();
+          // open created post
+          const snap = await get(postRef);
+          openPostPopup(postRef.key, snap.val());
+        }catch(err){ alert(err.message); }
+      }
+    }
+
+    function renderPostItem(key, p){
+      const a = document.createElement('a');
+      a.href="#"; a.className='post'; a.dataset.id=key;
+      a.innerHTML = `
+        <div class="row">
+          <div class="avatar">${p.authorPhoto? `<img src="${p.authorPhoto}">` : `<span>${(p.authorName||'?').slice(0,1).toUpperCase()}</span>`}</div>
+          <div style="flex:1">
+            <div class="title">${p.title}</div>
+            <div class="muted" style="font-size:12px">by <span class="author" data-uid="${p.authorUid}">${p.authorName||'Student'}</span> • ${fmtTime(p.timestamp)} • <span class="likes">👍 ${p.likeCount||0}  👎 ${p.dislikeCount||0}  💬 ${p.commentCount||0}</span></div>
+          </div>
+          ${p.imageURL? '<span class="chip">image</span>':''}
+        </div>`;
+      a.onclick = (e)=>{ e.preventDefault(); openPostPopup(key, p); };
+      // author link
+      a.querySelector('.author').onclick = (e)=>{ e.preventDefault(); e.stopPropagation(); openUserProfile(p.authorUid); };
+      return a;
+    }
+
+    async function openPostPopup(key, pInit){
+      const dlg = $('#postDlg');
+      const snap = await get(ref(db, `posts/${key}`));
+      const p = snap.exists()? snap.val() : pInit;
+      dlg.innerHTML = `
+        <div class="card" style="max-width:800px">
+          <div class="sec row">
+            <div class="avatar">${p.authorPhoto? `<img src="${p.authorPhoto}">` : `<span>${(p.authorName||'?').slice(0,1).toUpperCase()}</span>`}</div>
+            <div>
+              <div style="font-weight:800">${p.authorName||'Student'}</div>
+              <div class="muted" style="font-size:12px">${fmtTime(p.timestamp)}</div>
+            </div>
+            <div class="sp"></div>
+            <button class="btn ghost" id="ppClose">Close</button>
+          </div>
+          <div class="sec">
+            <div class="title" style="font-size:18px">${p.title}</div>
+            <div>${p.body}</div>
+            ${p.imageURL? `<div style="margin-top:8px"><img src="${p.imageURL}" style="max-width:100%;border-radius:10px;border:1px solid #20324a"/></div>`:''}
+          </div>
+          <div class="sec row">
+            <button class="action" id="ppLike">👍 Like <span id="ppLikeC">${p.likeCount||0}</span></button>
+            <button class="action" id="ppDislike">👎 Dislike <span id="ppDislikeC">${p.dislikeCount||0}</span></button>
+          </div>
+          <div class="sec">
+            <div style="font-weight:800;margin-bottom:6px">Comments</div>
+            <div id="ppComments"></div>
+            <div class="row" style="margin-top:8px">
+              <input id="ppNewComment" placeholder="Write a comment…" />
+              <button class="btn" id="ppAddComment">Post</button>
+            </div>
+          </div>
+        </div>`;
+      dlg.showModal();
+      $('#ppClose', dlg).onclick = ()=> dlg.close();
+
+      // Live counts
+      onValue(ref(db, `posts/${key}/likeCount`), s=> $('#ppLikeC', dlg).textContent = s.val()||0);
+      onValue(ref(db, `posts/${key}/dislikeCount`), s=> $('#ppDislikeC', dlg).textContent = s.val()||0);
+
+      // Voting
+      const ensureAuth = ()=>{ if(!auth.currentUser){ openLogin(); return false } return true };
+      $('#ppLike', dlg).onclick = ()=> setVote(key, 1);
+      $('#ppDislike', dlg).onclick = ()=> setVote(key, -1);
+
+      // Comments stream
+      const list = $('#ppComments', dlg);
+      list.innerHTML='';
+      onChildAdded(ref(db, `comments/${key}`), (snap)=>{
+        const c = snap.val();
+        const div = document.createElement('div');
+        div.className='post';
+        div.innerHTML = `<div class="row"><div class="avatar">${c.authorPhoto? `<img src="${c.authorPhoto}">` : `<span>${(c.authorName||'?').slice(0,1).toUpperCase()}</span>`}</div><div><div style="font-weight:600">${c.authorName||'Student'}</div><div class="muted" style="font-size:12px">${fmtTime(c.timestamp)}</div></div></div><div style="margin-top:6px">${c.text}</div>`;
+        list.appendChild(div);
+      });
+
+      $('#ppAddComment', dlg).onclick = async ()=>{
+        if(!ensureAuth()) return;
+        const u = auth.currentUser;
+        const text = $('#ppNewComment', dlg).value.trim();
+        if(!text) return;
+        const cRef = push(ref(db, `comments/${key}`));
+        await set(cRef, { uid:u.uid, authorName:u.displayName||u.email, authorPhoto:u.photoURL||'', text, timestamp:Date.now() });
+        $('#ppNewComment', dlg).value='';
+        await runTransaction(ref(db, `posts/${key}/commentCount`), n=> (n||0)+1);
+      };
+
+      function setVote(postId, val){
+        if(!ensureAuth()) return;
+        const u = auth.currentUser;
+        const voteRef = ref(db, `postVotes/${postId}/${u.uid}`);
+        get(voteRef).then(async (snap)=>{
+          const prev = snap.val()||0;
+          if(prev===val){ // toggle off
+            await set(voteRef, null);
+            if(val===1) await runTransaction(ref(db, `posts/${postId}/likeCount`), n=> (n||0)-1);
+            else await runTransaction(ref(db, `posts/${postId}/dislikeCount`), n=> (n||0)-1);
+          } else {
+            // adjust counts according to change
+            if(prev===1) await runTransaction(ref(db, `posts/${postId}/likeCount`), n=> (n||0)-1);
+            if(prev===-1) await runTransaction(ref(db, `posts/${postId}/dislikeCount`), n=> (n||0)-1);
+            await set(voteRef, val);
+            if(val===1) await runTransaction(ref(db, `posts/${postId}/likeCount`), n=> (n||0)+1);
+            else await runTransaction(ref(db, `posts/${postId}/dislikeCount`), n=> (n||0)+1);
+          }
+        });
+      }
+    }
+
+    // ---------- FEED STREAM ----------
+    function attachFeed(){
+      feed.innerHTML='';
+      onChildAdded(ref(db, 'posts'), (snap)=>{
+        const p = snap.val();
+        const item = renderPostItem(snap.key, p);
+        feed.prepend(item);
+        empty.classList.add('hidden');
+      });
+      onValue(ref(db, 'posts'), (snap)=>{ if(!snap.exists()) empty.classList.remove('hidden'); });
+    }
+
+    // ---------- WIRING ----------
+    btnLogin.onclick = openLogin;
+    btnSignup.onclick = openSignup;
+    btnLogout.onclick = ()=> signOut(auth);
+    btnEditProfile.onclick = ()=> auth.currentUser && openProfileEditor(auth.currentUser);
+    btnNew.onclick = openEditor;
+
+    $('#q').addEventListener('input', ()=>{
+      const q = $('#q').value.toLowerCase();
+      $$('.post', feed).forEach(n=>{
+        const hay = n.textContent.toLowerCase();
+        n.style.display = hay.includes(q)? '' : 'none';
+      });
+    });
+    document.addEventListener('keydown', (e)=>{ if(e.key==='/' && document.activeElement.tagName!=='INPUT' && document.activeElement.tagName!=='TEXTAREA'){ e.preventDefault(); $('#q').focus(); }});
+
+    onAuthStateChanged(auth, async (user)=>{
+      if(user){
+        meName.textContent = user.displayName || 'Student';
+        meEmail.textContent = user.email;
+        meAvatar.innerHTML = user.photoURL? `<img src="${user.photoURL}">` : `<span>${(user.displayName||user.email||'?').slice(0,1).toUpperCase()}</span>`;
+        btnLogin.classList.add('hidden');
+        btnSignup.classList.add('hidden');
+        btnLogout.classList.remove('hidden');
+        btnEditProfile.classList.remove('hidden');
+        // Ensure user profile doc exists
+        const us = await get(ref(db, `users/${user.uid}`));
+        if(!us.exists()){
+          await set(ref(db, `users/${user.uid}`), { uid:user.uid, displayName:user.displayName||user.email, bio:'', photoURL:user.photoURL||'', followers:0, following:0, createdAt:Date.now() });
+        }
+      } else {
+        meName.textContent = 'Guest';
+        meEmail.textContent = 'Not signed in';
+        meAvatar.innerHTML = '<span>?</span>';
+        btnLogin.classList.remove('hidden');
+        btnSignup.classList.remove('hidden');
+        btnLogout.classList.add('hidden');
+        btnEditProfile.classList.add('hidden');
+      }
+    });
+
+    attachFeed();
+  </script>
+</body>
+</html>
